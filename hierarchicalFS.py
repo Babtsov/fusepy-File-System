@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+import os
 import logging
 
 from collections import defaultdict
@@ -20,14 +20,13 @@ class File(object):
          if file is a reg: data should contain the content as str
     """
     def __init__(self,absolute_path,properties,data):
-        print "new File!"
         if absolute_path == '/':
             self.name = '/'
-            self.context_ref = ''
+            self.context_name = ''
         else:
             path_elements = absolute_path.split('/')
             self.name = path_elements.pop()
-            self.context_ref = '/'.join(path_elements)
+            self.context_name = '/'.join(path_elements)
         self.properties = properties
         self.data = data
 
@@ -36,10 +35,17 @@ class File(object):
 
     def get_abs_path(self): #get the absolute path
         if self.name == '/': return '/'
-        return self.context_ref + '/' + self.name
+        return self.context_name + '/' + self.name
 
 
 class Memory(LoggingMixIn, Operations):
+
+    def __init__(self):
+        self.fd = 0
+        now = time()
+        root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
+                               st_mtime=now, st_atime=now, st_nlink=2)
+        self.root = File("/",root_properties, {})
 
     def lookup(self,path):
         if path == '/':
@@ -58,37 +64,30 @@ class Memory(LoggingMixIn, Operations):
             else:
                 return file # we have a regular file, so return it
 
-    def __init__(self):
-        print "new memory!"
-        self.fd = 0
-        now = time()
-        root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
-                               st_mtime=now, st_atime=now, st_nlink=2)
-        self.root = File("/",root_properties, {})
-
-    def chmod(self, path, mode):
+    def chmod(self, path, mode): # TODO::
         self.files[path]['st_mode'] &= 0770000
         self.files[path]['st_mode'] |= mode
         return 0
 
-    def chown(self, path, uid, gid):
+    def chown(self, path, uid, gid): # TODO::
         self.files[path]['st_uid'] = uid
         self.files[path]['st_gid'] = gid
 
     def create(self, path, mode):
         print "create(self,   {0},   {1})".format(path,mode)
-        self.files[path] = dict(st_mode=(S_IFREG | mode), st_nlink=1,
+        new_file_propeties = dict(st_mode=(S_IFREG | mode), st_nlink=1,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
+        new_file = File(path,new_file_propeties,bytes())
+        assert new_file.get_type() == S_IFREG
+        parent_dir = self.lookup(os.path.dirname(path))
+        parent_dir.data[new_file.name] = new_file # include a reference to the new file in the parent dir
+
         self.fd += 1
         return self.fd
 
     def getattr(self, path, fh=None):
         print "getattr(self,   {0},   {1})".format(path,fh)
-        # if path not in self.files:
-        #     raise FuseOSError(ENOENT)
-        #
-        # return self.files[path]
         return self.lookup(path).properties
 
     def getxattr(self, path, name, position=0):
@@ -101,12 +100,12 @@ class Memory(LoggingMixIn, Operations):
         except KeyError:
             return ''       # Should return ENOATTR
 
-    def listxattr(self, path):
+    def listxattr(self, path):  # TODO::
         print "listxattr"
         attrs = self.files[path].get('attrs', {})
         return attrs.keys()
 
-    def mkdir(self, path, mode):
+    def mkdir(self, path, mode):  # TODO::
         print "mkdir(self,   {0},   {1})".format(path,mode)
 
         self.files[path] = dict(st_mode=(S_IFDIR | mode), st_nlink=2,
@@ -115,61 +114,41 @@ class Memory(LoggingMixIn, Operations):
 
         self.files['/']['st_nlink'] += 1
 
-
     def open(self, path, flags):
         print "open(self,   {0},   {1})".format(path,flags)
         self.fd += 1
         return self.fd
 
-    def read(self, path, size, offset, fh):
+    def read(self, path, size, offset, fh):  # TODO::
         print "read(self,   {0},   {1},   {2},   {3})".format(path,size,offset,fh)
         return self.data[path][offset:offset + size]
 
     def readdir(self, path, fh):
-        # print "=======================BEGIN reddir=================================="
-        # print "ARGS: path={0} fh={1}".format(path,fh)
-        # print "OBJECT: "
-        # print "fd: ",self.fd
-        # print "files: "
-        # for key,file in self.files.items():
-        #     print key,"   ",file
-        # print "Data: "
-        # for key,elem in self.data.items():
-        #     print key,"   ",elem
-        # print "------------------------END   reddir----------------------------------"
-        # return ['.', '..'] + [x[1:] for x in self.files if x != '/']
-
         print "readdir(self,   {0},   {1})".format(path,fh)
         directory = self.lookup(path) # directory is of type file
-        # print "after dict"
-        # print directory.data
-        # print "loco"
-        # for x in directory.data:
-        #     print "judge: ",x
         return ['.', '..'] + [x for x in directory.data]
 
-
-    def readlink(self, path):
+    def readlink(self, path):  # TODO::
         print "readlink(self,   {0})".format(path)
         return self.data[path]
 
-    def removexattr(self, path, name):
+    def removexattr(self, path, name):  # TODO::
         print "removexattr(self,   {0},   {1})".format(path,name)
-        attrs = self.files[path].get('attrs', {})
+        # attrs = self.files[path].get('attrs', {})
+        #
+        # try:
+        #     del attrs[name]
+        # except KeyError:
+        #     pass        # Should return ENOATTR
 
-        try:
-            del attrs[name]
-        except KeyError:
-            pass        # Should return ENOATTR
-
-    def rename(self, old, new):
+    def rename(self, old, new):  # TODO::
         self.files[new] = self.files.pop(old)
 
-    def rmdir(self, path):
+    def rmdir(self, path):  # TODO::
         self.files.pop(path)
         self.files['/']['st_nlink'] -= 1
 
-    def setxattr(self, path, name, value, options, position=0):
+    def setxattr(self, path, name, value, options, position=0):  # TODO::
         print "setxattr(self,   {0},   {1},   {2},   {3},   {4})".format(path,name,value,options,position)
         # Ignore options
         attrs = self.files[path].setdefault('attrs', {})
@@ -178,25 +157,25 @@ class Memory(LoggingMixIn, Operations):
     def statfs(self, path):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
 
-    def symlink(self, target, source):
+    def symlink(self, target, source):  # TODO::
         self.files[target] = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,
                                   st_size=len(source))
         self.data[target] = source
 
-    def truncate(self, path, length, fh=None):
+    def truncate(self, path, length, fh=None):  # TODO::
         self.data[path] = self.data[path][:length]
         self.files[path]['st_size'] = length
 
-    def unlink(self, path):
+    def unlink(self, path):  # TODO::
         self.files.pop(path)
 
-    def utimens(self, path, times=None):
+    def utimens(self, path, times=None):  # TODO::
         now = time()
-        atime, mtime = times if times else (now, now)
-        self.files[path]['st_atime'] = atime
-        self.files[path]['st_mtime'] = mtime
+        # atime, mtime = times if times else (now, now)
+        # self.files[path]['st_atime'] = atime
+        # self.files[path]['st_mtime'] = mtime
 
-    def write(self, path, data, offset, fh):
+    def write(self, path, data, offset, fh):  # TODO:: 
         print "write(self,   {0},   {1},   {2},   {3})".format(path,data,offset,fh)
         self.data[path] = self.data[path][:offset] + data
         self.files[path]['st_size'] = len(self.data[path])
