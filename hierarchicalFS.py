@@ -53,8 +53,6 @@ class Memory(LoggingMixIn, Operations):
         path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
         context = self.root
         for name in path_parts:
-            print "name: ",name
-            print"context.data: ",context.data
             try:
                 file = context.data[name]
             except KeyError:
@@ -77,7 +75,7 @@ class Memory(LoggingMixIn, Operations):
         self.files[path]['st_gid'] = gid
 
     def create(self, path, mode):
-        print "create(self,   {0},   {1})".format(path,mode)
+        print "create(self, {0}, {1})".format(path,mode)
         new_file_propeties = dict(st_mode=(S_IFREG | mode), st_nlink=1,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
@@ -89,16 +87,13 @@ class Memory(LoggingMixIn, Operations):
         return self.fd
 
     def getattr(self, path, fh=None):
-        print "getattr(self,   {0},   {1})".format(path,fh)
-        file = self.lookup(path)
-        print type(file)
-        return file.properties
+        print "getattr(self, {0}, {1})".format(path,fh)
+        return self.lookup(path).properties
 
     def getxattr(self, path, name, position=0):
-        print "getxattr(self,   {0},   {1}  ,{2})".format(path,name,position)
+        print "getxattr(self, {0}, {1}, {2})".format(path,name,position)
         file = self.lookup(path)
         attrs = file.properties.get('attrs', {})
-
         try:
             return attrs[name]
         except KeyError:
@@ -109,8 +104,8 @@ class Memory(LoggingMixIn, Operations):
         attrs = self.files[path].get('attrs', {})
         return attrs.keys()
 
-    def mkdir(self, path, mode):  # TODO:: verify
-        print "mkdir(self,   {0},   {1})".format(path,mode)
+    def mkdir(self, path, mode):
+        print "mkdir(self, {0}, {1})".format(path,mode)
         new_dir_properties = dict(st_mode=(S_IFDIR | mode), st_nlink=2,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
@@ -121,28 +116,28 @@ class Memory(LoggingMixIn, Operations):
         parent_dir.properties['st_nlink'] += 1
 
     def open(self, path, flags):
-        print "open(self,   {0},   {1})".format(path,flags)
+        print "open(self, {0}, {1})".format(path,flags)
         self.fd += 1
         return self.fd
 
-    def read(self, path, size, offset, fh):  # TODO:: verify
-        print "read(self,   {0},   {1},   {2},   {3})".format(path,size,offset,fh)
+    def read(self, path, size, offset, fh):
+        print "read(self, {0}, {1}, {2}, {3})".format(path,size,offset,fh)
         file = self.lookup(path)
         assert file.get_type() == S_IFREG
         return file.data[offset:offset + size]
 
     def readdir(self, path, fh):
-        print "readdir(self,   {0},   {1})".format(path,fh)
+        print "readdir(self, {0}, {1})".format(path,fh)
         directory = self.lookup(path)
         assert directory.get_type() == S_IFDIR
         return ['.', '..'] + [x for x in directory.data]
 
     def readlink(self, path):  # TODO::
-        print "readlink(self,   {0})".format(path)
+        print "readlink(self, {0})".format(path)
         return self.data[path]
 
     def removexattr(self, path, name):  # TODO::
-        print "removexattr(self,   {0},   {1})".format(path,name)
+        print "removexattr(self, {0}, {1})".format(path,name)
         # attrs = self.files[path].get('attrs', {})
         #
         # try:
@@ -158,7 +153,7 @@ class Memory(LoggingMixIn, Operations):
         self.files['/']['st_nlink'] -= 1
 
     def setxattr(self, path, name, value, options, position=0):  # TODO::
-        print "setxattr(self,   {0},   {1},   {2},   {3},   {4})".format(path,name,value,options,position)
+        print "setxattr(self, {0}, {1}, {2}, {3}, {4})".format(path,name,value,options,position)
         # Ignore options
         attrs = self.files[path].setdefault('attrs', {})
         attrs[name] = value
@@ -171,9 +166,11 @@ class Memory(LoggingMixIn, Operations):
                                   st_size=len(source))
         self.data[target] = source
 
-    def truncate(self, path, length, fh=None):  # TODO::
-        self.data[path] = self.data[path][:length]
-        self.files[path]['st_size'] = length
+    def truncate(self, path, length, fh=None):
+        file = self.lookup(path)
+        assert file.get_type() == S_IFREG
+        file.data = file.data[:length]
+        file.properties['st_size'] = length
 
     def unlink(self, path):  # TODO::
         self.files.pop(path)
@@ -184,10 +181,12 @@ class Memory(LoggingMixIn, Operations):
         # self.files[path]['st_atime'] = atime
         # self.files[path]['st_mtime'] = mtime
 
-    def write(self, path, data, offset, fh):  # TODO::
-        print "write(self,   {0},   {1},   {2},   {3})".format(path,data,offset,fh)
-        self.data[path] = self.data[path][:offset] + data
-        self.files[path]['st_size'] = len(self.data[path])
+    def write(self, path, data, offset, fh):
+        print "write(self, {0}, {1}, {2}, {3})".format(path,data,offset,fh)
+        file = self.lookup(path)
+        assert file.get_type() == S_IFREG
+        file.data = file.data[:offset] + data
+        file.properties['st_size'] = len(file.data)
         return len(data)
 
 
