@@ -172,8 +172,11 @@ class Memory(LoggingMixIn, Operations):
         file.data = file.data[:length]
         file.properties['st_size'] = length
 
-    def unlink(self, path):  # TODO::
-        self.files.pop(path)
+    def unlink(self, path):
+        print "unlink(self, {0})".format(path)
+        parent_dir = self.lookup(os.path.dirname(path))
+        file = self.lookup(path)
+        parent_dir.data.pop(file.name)
 
     def utimens(self, path, times=None):  # TODO::
         now = time()
