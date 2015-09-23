@@ -45,7 +45,7 @@ class Memory(LoggingMixIn, Operations):
         now = time()
         root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
                                st_mtime=now, st_atime=now, st_nlink=2)
-        self.root = File("/",root_properties, {})
+        self.root = File('/', root_properties, {})
 
     def lookup(self,path):
         if path == '/':
@@ -53,16 +53,19 @@ class Memory(LoggingMixIn, Operations):
         path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
         context = self.root
         for name in path_parts:
+            print "name: ",name
+            print"context.data: ",context.data
             try:
                 file = context.data[name]
             except KeyError:
                 raise FuseOSError(ENOENT)
-
-            assert isinstance(file,File)
+            assert isinstance(file, File)
             if file.get_type() == S_IFDIR: # we have a directory
-                context = file
+                context = file # set the directory as the new context for the lookup
             else:
                 return file # we have a regular file, so return it
+        # if we reached this point, it means that the requested file is a dir, so return it
+        return context
 
     def chmod(self, path, mode): # TODO::
         self.files[path]['st_mode'] &= 0770000
@@ -78,17 +81,18 @@ class Memory(LoggingMixIn, Operations):
         new_file_propeties = dict(st_mode=(S_IFREG | mode), st_nlink=1,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
-        new_file = File(path,new_file_propeties,bytes())
-        assert new_file.get_type() == S_IFREG
+        new_file = File(path,new_file_propeties,bytes()) # make am empty file
         parent_dir = self.lookup(os.path.dirname(path))
+        assert parent_dir.get_type() == S_IFDIR
         parent_dir.data[new_file.name] = new_file # include a reference to the new file in the parent dir
-
         self.fd += 1
         return self.fd
 
     def getattr(self, path, fh=None):
         print "getattr(self,   {0},   {1})".format(path,fh)
-        return self.lookup(path).properties
+        file = self.lookup(path)
+        print type(file)
+        return file.properties
 
     def getxattr(self, path, name, position=0):
         print "getxattr(self,   {0},   {1}  ,{2})".format(path,name,position)
@@ -105,27 +109,32 @@ class Memory(LoggingMixIn, Operations):
         attrs = self.files[path].get('attrs', {})
         return attrs.keys()
 
-    def mkdir(self, path, mode):  # TODO::
+    def mkdir(self, path, mode):  # TODO:: verify
         print "mkdir(self,   {0},   {1})".format(path,mode)
-
-        self.files[path] = dict(st_mode=(S_IFDIR | mode), st_nlink=2,
+        new_dir_properties = dict(st_mode=(S_IFDIR | mode), st_nlink=2,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
-
-        self.files['/']['st_nlink'] += 1
+        new_dir = File(path,new_dir_properties,{})
+        parent_dir = self.lookup(os.path.dirname(path))
+        assert parent_dir.get_type() == S_IFDIR
+        parent_dir.data[new_dir.name] = new_dir # include a reference to the new dir in the parent dir
+        parent_dir.properties['st_nlink'] += 1
 
     def open(self, path, flags):
         print "open(self,   {0},   {1})".format(path,flags)
         self.fd += 1
         return self.fd
 
-    def read(self, path, size, offset, fh):  # TODO::
+    def read(self, path, size, offset, fh):  # TODO:: verify
         print "read(self,   {0},   {1},   {2},   {3})".format(path,size,offset,fh)
-        return self.data[path][offset:offset + size]
+        file = self.lookup(path)
+        assert file.get_type() == S_IFREG
+        return file.data[offset:offset + size]
 
     def readdir(self, path, fh):
         print "readdir(self,   {0},   {1})".format(path,fh)
-        directory = self.lookup(path) # directory is of type file
+        directory = self.lookup(path)
+        assert directory.get_type() == S_IFDIR
         return ['.', '..'] + [x for x in directory.data]
 
     def readlink(self, path):  # TODO::
@@ -175,7 +184,7 @@ class Memory(LoggingMixIn, Operations):
         # self.files[path]['st_atime'] = atime
         # self.files[path]['st_mtime'] = mtime
 
-    def write(self, path, data, offset, fh):  # TODO:: 
+    def write(self, path, data, offset, fh):  # TODO::
         print "write(self,   {0},   {1},   {2},   {3})".format(path,data,offset,fh)
         self.data[path] = self.data[path][:offset] + data
         self.files[path]['st_size'] = len(self.data[path])
