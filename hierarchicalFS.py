@@ -55,6 +55,8 @@ class Memory(LoggingMixIn, Operations):
         if path == '/':
             return self.root
         path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
+        if path_parts[-1] == '': # path_parts[-1] will be '' if path ends with / (./a/b/)
+            path_parts.pop() # remove it so we won't be iterating through an empty name
         context = self.root
         for name in path_parts:
             try:
@@ -135,7 +137,7 @@ class Memory(LoggingMixIn, Operations):
         assert directory.get_type() == S_IFDIR
         return ['.', '..'] + [x for x in directory.data]
 
-    def readlink(self, path):  # TODO:: verify
+    def readlink(self, path):
         print "readlink(self, {0})".format(path)
         link = self.lookup(path)
         return os.getcwd() + '/' + argv[1] + self.lookup(link.data).absolute_path
@@ -176,11 +178,6 @@ class Memory(LoggingMixIn, Operations):
         link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,
                                   st_size=len(source))
         source_file = self.lookup(source)
-        try:
-            print "loco Source: type: ", dir(source_file)
-            print "SOURCE FILE for symlink: ", source_file.absolute_path
-        except:
-            print "error!!"
         parent_dir = self.lookup(os.path.dirname(target))
         link = File(target,link_properties,source_file.absolute_path)
         parent_dir.data[link.name] = link
