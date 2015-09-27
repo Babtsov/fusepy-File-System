@@ -29,6 +29,7 @@ class File(object):
         self data:
             Directory file: self.data is a dict <name,File>
             Regular file: self.data contains the content of the file as str
+            link: self.data contains a reference to a File
     """
     def __init__(self,absolute_path,properties,data):
         self.absolute_path = absolute_path
@@ -101,7 +102,7 @@ class Memory(LoggingMixIn, Operations):
         except KeyError:
             return ''       # Should return ENOATTR
 
-    def listxattr(self, path):  # TODO:: verify
+    def listxattr(self, path):
         print "listxattr(self, {0}".format(path)
         attrs = self.lookup(path).properties.get('attrs', {})
         return attrs.keys()
@@ -134,11 +135,12 @@ class Memory(LoggingMixIn, Operations):
         assert directory.get_type() == S_IFDIR
         return ['.', '..'] + [x for x in directory.data]
 
-    def readlink(self, path):  # TODO::
+    def readlink(self, path):  # TODO:: verify
         print "readlink(self, {0})".format(path)
-        return self.data[path]
+        link = self.lookup(path)
+        return os.getcwd() + '/' + argv[1] + self.lookup(link.data).absolute_path
 
-    def removexattr(self, path, name):  # TODO:: verify
+    def removexattr(self, path, name):
         print "removexattr(self, {0}, {1})".format(path,name)
         attrs = self.lookup(path).properties.get('attrs', {})
         try:
@@ -154,11 +156,13 @@ class Memory(LoggingMixIn, Operations):
         relocated_file.absolute_path = new # change the name and the context_name of the file.
         self.lookup(os.path.dirname(new)).data[relocated_file.name] = relocated_file
 
-    def rmdir(self, path):  # TODO::
-        self.files.pop(path)
-        self.files['/']['st_nlink'] -= 1
+    def rmdir(self, path):
+        print "rmdir(self, {0})".format(path)
+        dir, parent_dir = self.lookup(path), self.lookup(os.path.dirname(path))
+        del parent_dir.data[dir.name]
+        parent_dir.properties['st_nlink'] -= 1
 
-    def setxattr(self, path, name, value, options, position=0):  # TODO:: verify
+    def setxattr(self, path, name, value, options, position=0):
         print "setxattr(self, {0}, {1}, {2}, {3}, {4})".format(path,name,value,options,position)
         # Ignore options
         attrs = self.lookup(path).properties.setdefault('attrs', {})
@@ -168,9 +172,18 @@ class Memory(LoggingMixIn, Operations):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
 
     def symlink(self, target, source):  # TODO::
-        self.files[target] = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,
+        print "symlink(self, {0}, {1})".format(target,source)
+        link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,
                                   st_size=len(source))
-        self.data[target] = source
+        source_file = self.lookup(source)
+        try:
+            print "loco Source: type: ", dir(source_file)
+            print "SOURCE FILE for symlink: ", source_file.absolute_path
+        except:
+            print "error!!"
+        parent_dir = self.lookup(os.path.dirname(target))
+        link = File(target,link_properties,source_file.absolute_path)
+        parent_dir.data[link.name] = link
 
     def truncate(self, path, length, fh=None):
         print "truncate(self, {0}, {1}, {2})".format(path,length,fh)
@@ -185,7 +198,7 @@ class Memory(LoggingMixIn, Operations):
         file = self.lookup(path)
         parent_dir.data.pop(file.name)
 
-    def utimens(self, path, times=None):  # TODO:: verify
+    def utimens(self, path, times=None):
         print "utimens(self, {0}, {1})".format(path,times)
         now = time()
         atime, mtime = times if times else (now, now)
