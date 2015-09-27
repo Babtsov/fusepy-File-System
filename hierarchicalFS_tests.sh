@@ -15,7 +15,7 @@ echo "I'm in dir1" > here.txt
 mkdir dir11
 mkdir dir12
 cd ./dir12
-touch here
+echo "we are in dir12" > try_me.txt
 # return back to root and print file system
 cd ../..
 echo "Contents of the file system:"
@@ -36,5 +36,23 @@ rm -R DIR2
 echo "Contents of the file system:"
 pwd
 ls -R
+
+echo
+echo "make a new link to ./dir1/dir12/tryme called shortcut"
+ln -s ./dir1/dir12/try_me.txt shortcut
+echo "Contents of the root:"
+pwd
+ls -alt
+
+# parallels@ubuntu:~/PycharmProjects/untitled/tests$ ln -s ./unpack/dir11/ judge1
+echo
+echo "make a new link to ./dir1/dir12/ called our_dir12"
+echo "then, follow the link"
+ln -s ./dir1/dir12 loco
+# touch createdByLink > our_dir12
+echo "Contents of the root:"
+pwd
+ls -alt
+
 echo "------------------------- END File system tests --------------------------"
 
