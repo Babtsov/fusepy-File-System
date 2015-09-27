@@ -17,38 +17,32 @@ if not hasattr(__builtins__, 'bytes'):
 
 class File(object):
     """ Represents a file (regular file, directory, or soft link) on the file system.
-        self.name: the name of the file (str)
-        self.context_name: the name of the directory that contains the file (str)
+        PROPERTIES OF THE OBJECT:
+        self.absolute_path: the absolute path of the file.
+            The following properties depend on the absolute_path and are read-only
+            self.name: the name of the file (str)
+            self.context_name: the name of the directory that contains the file (str)
+
         self.properties: contains all the attr and xattr the OS uses to categorize the files,
             this includes their type too (dict).
+
         self data:
             Directory file: self.data is a dict <name,File>
             Regular file: self.data contains the content of the file as str
     """
     def __init__(self,absolute_path,properties,data):
-        self.set_abs_path(absolute_path) # initialize self.name and self.context_name
+        self.absolute_path = absolute_path
         self.properties = properties
         self.data = data
 
     def get_type(self): # check if the file is a directory or a regular file
         return self.properties['st_mode'] & 0770000
 
-    def get_abs_path(self): #get the absolute path
-        if self.name == '/': return '/'
-        return self.context_name + '/' + self.name
-
-    def set_abs_path(self,absolute_path):
-        if absolute_path == '/':
-            self.name = '/'
-            self.context_name = ''
-        else:
-            path_elements = absolute_path.split('/')
-            self.name = path_elements.pop()
-            self.context_name = '/'.join(path_elements)
+    name = property(lambda self: os.path.basename(self.absolute_path))
+    context_name = property(lambda self: os.path.dirname(self.absolute_path))
 
 
 class Memory(LoggingMixIn, Operations):
-
     def __init__(self):
         self.fd = 0
         now = time()
@@ -157,7 +151,7 @@ class Memory(LoggingMixIn, Operations):
         relocated_file = self.lookup(old)
         old_parent = self.lookup(os.path.dirname(old))
         del old_parent.data[relocated_file.name] # pop the File from the old location
-        relocated_file.set_abs_path(new) # change the name and the context_name of the file.
+        relocated_file.absolute_path = new # change the name and the context_name of the file.
         self.lookup(os.path.dirname(new)).data[relocated_file.name] = relocated_file
 
     def rmdir(self, path):  # TODO::
