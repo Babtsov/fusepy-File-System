@@ -26,10 +26,10 @@ class File(object):
         self.properties: contains all the attr and xattr the OS uses to categorize the files,
             this includes their type too (dict).
 
-        self data:
+        self.data:
             Directory file: self.data is a dict <name,File>
             Regular file: self.data contains the content of the file as str
-            link: self.data contains a reference to a File
+            Link file: self.data contains a FULL path (from the OS root) stored as a str
     """
     def __init__(self,absolute_path,properties,data):
         self.absolute_path = absolute_path
@@ -140,7 +140,8 @@ class Memory(LoggingMixIn, Operations):
     def readlink(self, path):
         print "readlink(self, {0})".format(path)
         link = self.lookup(path)
-        return os.getcwd() + '/' + argv[1] + self.lookup(link.data).absolute_path
+        assert link.get_type() == S_IFLNK
+        return link.data
 
     def removexattr(self, path, name):
         print "removexattr(self, {0}, {1})".format(path,name)
@@ -173,13 +174,14 @@ class Memory(LoggingMixIn, Operations):
     def statfs(self, path):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
 
-    def symlink(self, target, source):  # TODO::
+    def symlink(self, target, source):
         print "symlink(self, {0}, {1})".format(target,source)
-        link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,
-                                  st_size=len(source))
+        link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,st_size=len(source),
+                               st_ctime=time(), st_mtime=time(),st_atime=time())
         source_file = self.lookup(source)
         parent_dir = self.lookup(os.path.dirname(target))
-        link = File(target,link_properties,source_file.absolute_path)
+        full_os_path = os.getcwd() + '/' + argv[1] + source_file.absolute_path
+        link = File(target,link_properties,full_os_path)
         parent_dir.data[link.name] = link
 
     def truncate(self, path, length, fh=None):
