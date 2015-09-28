@@ -62,18 +62,23 @@ class File(object):
 
 
 class Memory(LoggingMixIn, Operations):
-    def show_ht_lut(self): # function used for debugging
+    def show_server_content(self): # function used for debugging
         print "**************** Server Contents ***************************"
         file_lut = File.pull(0)
         print "lut content:\n", file_lut
         serial_numbers = [x for x in file_lut.values()]
-        max_serial_num = max(serial_numbers)
+        self.max_serial_num = max(max(serial_numbers),self.max_serial_num)
         print "ht content:"
-        for index in range(max_serial_num+1):
-            print index,": ",File.pull(index)
+        for index in range(self.max_serial_num+1):
+            file = loads(rpc.get(Binary(str(index)))['value'].data)
+            if file == None: # File has been removed
+                print index,": ","The file at node {0} has been removed.".format(index)
+            else:
+                print index,": ",File.pull(index)
         print "************************************************************"
 
     def __init__(self):
+        self.max_serial_num = 0 # used for debugging
         self.fd = 0
         now = time()
         root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
@@ -107,7 +112,7 @@ class Memory(LoggingMixIn, Operations):
     def ht_update(file,**kwargs): # update the hash table of the server
         if kwargs['action'] == 'add file' or kwargs['action'] == 'update file':
             File.push(file.serial_number,file)
-        elif kwargs['action'] == 'delete file':
+        elif kwargs['action'] == 'remove file':
             File.push(file.serial_number,None) # mark file as deleted
         else: raise RuntimeError
 
@@ -143,7 +148,7 @@ class Memory(LoggingMixIn, Operations):
 
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
-        self.show_ht_lut() # debug
+        self.show_server_content() # debug
         return self.lut_lookup(path).properties
 
     def getxattr(self, path, name, position=0):
@@ -271,13 +276,15 @@ class Memory(LoggingMixIn, Operations):
     def unlink(self, path):
         print "unlink(self, {0})".format(path)
         # remove reference from the parent dir
-        parent_dir = pull_file(os.path.dirname(path))
+        file = self.lut_lookup(path)
+        parent_dir = self.lut_lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
-        parent_dir.data.remove(path)
-        push_file(os.path.dirname(path),parent_dir)
-
+        parent_dir.data.remove(file.serial_number)
+        self.ht_update(parent_dir,action='update file')
+        # update the lut so we know file doesn't exist
+        self.lut_update(file,action='remove file')
         # mark file as removed in the server ht
-        push_file(path,None)
+        self.ht_update(file,action='remove file')
 
     def utimens(self, path, times=None):
         print "utimens(self, {0}, {1})".format(path,times)
