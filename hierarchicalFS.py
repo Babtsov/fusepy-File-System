@@ -178,7 +178,11 @@ class Memory(LoggingMixIn, Operations):
         print "symlink(self, {0}, {1})".format(target,source)
         link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,st_size=len(source),
                                st_ctime=time(), st_mtime=time(),st_atime=time())
-        source_file = self.lookup(source)
+        file_system_os_path = os.getcwd() + '/' + argv[1] # the path of the FUSE FS relative to the OS's FS
+        source_path = source
+        if file_system_os_path in source:
+            source_path = source.replace(file_system_os_path,'')
+        source_file = self.lookup(source_path)
         parent_dir = self.lookup(os.path.dirname(target))
         full_os_path = os.getcwd() + '/' + argv[1] + source_file.absolute_path
         link = File(target,link_properties,full_os_path)
