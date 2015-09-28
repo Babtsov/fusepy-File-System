@@ -8,7 +8,7 @@ mkdir dir2
 mkdir dir2/dir21
 touch dir2/file1.txt
 echo "I'm in dir2!" > dir2/coco.txt
-# add content to dir1 by 
+# add content to dir1 by moving through the file system
 cd ./dir1
 touch look.txt
 echo "I'm in dir1" > here.txt
@@ -37,22 +37,13 @@ echo "Contents of the file system:"
 pwd
 ls -R
 
+cd ..
 echo
-echo "make a new link to ./dir1/dir12/tryme called shortcut"
-ln -s ./dir1/dir12/try_me.txt shortcut
-echo "Contents of the root:"
+echo "make a new link /home/parallels/PycharmProjects/untitled/fusemount/Dir1/Dir2/hello.txt fusemount/Dir1/h2.txt"
+mkdir -p fusemount/Dir1/Dir2
+echo "hi, nice" > fusemount/Dir1/Dir2/hello.txt
 pwd
-ls -alt
-
-# parallels@ubuntu:~/PycharmProjects/untitled/tests$ ln -s ./unpack/dir11/ judge1
-echo
-echo "make a new link to ./dir1/dir12/ called our_dir12"
-echo "then, follow the link"
-ln -s ./dir1/dir12 loco
-# touch createdByLink > our_dir12
-echo "Contents of the root:"
-pwd
-ls -alt
-
+ln -s /home/parallels/PycharmProjects/untitled/fusemount/Dir1/Dir2/hello.txt fusemount/Dir1/h2.txt
+echo "contents of /Dir1: "
+ls -ltr fusemount/Dir1
 echo "------------------------- END File system tests --------------------------"
-
