@@ -198,9 +198,9 @@ class Memory(LoggingMixIn, Operations):
         assert directory.file_type == S_IFDIR
         return ['.', '..'] + [x for x in directory.data]
 
-    def readlink(self, path): #TODO:: symbolic links
+    def readlink(self, path):
         print "readlink(self, {0})".format(path)
-        link = self.lookup(path)
+        link = File.lookup(path)
         assert link.file_type == S_IFLNK
         return link.data
 
@@ -254,15 +254,20 @@ class Memory(LoggingMixIn, Operations):
     def statfs(self, path):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
 
-    def symlink(self, target, source): #TODO:: symbolic links
+    def symlink(self, target, source):
         print "symlink(self, {0}, {1})".format(target,source)
         link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,st_size=len(source),
                                st_ctime=time(), st_mtime=time(),st_atime=time())
-        source_file = self.lookup(source)
-        parent_dir = self.lookup(os.path.dirname(target))
-        full_os_path = os.getcwd() + '/' + argv[1] + source_file.absolute_path
+        file_system_os_path = os.getcwd() + '/' + argv[1] # the path of the FUSE FS relative to the OS's FS
+        source_path = source
+        if file_system_os_path in source:
+            source_path = source.replace(file_system_os_path,'')
+        parent_dir = File.lookup(os.path.dirname(target))
+        full_os_path = os.getcwd() + '/' + argv[1] + source_path
         link = File(target,link_properties,full_os_path)
-        parent_dir.data[link.name] = link
+        parent_dir.data[link.name] = link.serial_number
+        self.ht_update(link,action='add file')
+        self.ht_update(parent_dir,action='update file')
 
     def truncate(self, path, length, fh=None):
         print "truncate(self, {0}, {1}, {2})".format(path,length,fh)
