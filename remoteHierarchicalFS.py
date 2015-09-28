@@ -28,17 +28,19 @@ class File(object):
             Regular file: self.data contains the content of the file as str
             Link file: self.data contains a FULL path (from the OS root) stored as a str
     """
-    def __str__(self): # function used for debugging
-        representation = "[[File: name: {0}, data: {1}, ser num: {2} ]]".format(
-            self.name, repr(self.data), self.serial_number)
-        return representation
     _id = count(0)
+
     def __init__(self,absolute_path,properties,data):
         if absolute_path == '/': self.name = absolute_path
         else: self.name = os.path.basename(absolute_path)
         self.properties = properties
         self.data = data
         self.serial_number = self._id.next() #generate a unique serial number for every file
+
+    def __str__(self): # function used for debugging
+        representation = "[[ File: name: {0}, data: {1}, ser num: {2} ]]".format(
+            self.name, repr(self.data), self.serial_number)
+        return representation
 
     @staticmethod
     def push(serial_num,file): # pushes a file to the rpc server and associates it with a serial number in ht
@@ -62,6 +64,15 @@ class File(object):
 
 
 class Memory(LoggingMixIn, Operations):
+
+    def __init__(self):
+        self.fd = 0
+        now = time()
+        root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
+                               st_mtime=now, st_atime=now, st_nlink=2)
+        root = File('/',root_properties, {})
+        File.push(root.serial_number,root) # store in the server ht serial number -> object
+
     def show_server_content(self): # function used for debugging
         print "**************** Server Contents ***************************"
         max_serial_num = 10
@@ -75,14 +86,6 @@ class Memory(LoggingMixIn, Operations):
             except:
                 print index,": ","The file at node {0} doesn't exist.".format(index)
         print "************************************************************"
-
-    def __init__(self):
-        self.fd = 0
-        now = time()
-        root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
-                               st_mtime=now, st_atime=now, st_nlink=2)
-        root = File('/',root_properties, {})
-        File.push(root.serial_number,root) # store in the server ht serial number -> object
 
     @staticmethod
     def lut_lookup(path):
@@ -106,16 +109,6 @@ class Memory(LoggingMixIn, Operations):
                 return file # we have a regular file, so return it
         # if we reached this point, it means that the requested file is a dir, so return it
         return context
-
-    # @staticmethod
-    # def lut_update(file,**kwargs):
-    #     file_lut = File.pull(0)
-    #     if kwargs['action'] == 'add file':
-    #         file_lut[file.absolute_path] = file.serial_number
-    #     elif kwargs['action'] == 'remove file':
-    #         del file_lut[file.absolute_path]
-    #     else: raise RuntimeError
-    #     File.push(0,file_lut)
 
     @staticmethod
     def ht_update(file,**kwargs): # update the hash table of the server
@@ -156,7 +149,7 @@ class Memory(LoggingMixIn, Operations):
 
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
-        self.show_server_content() # debug
+        #self.show_server_content() # debug
         return self.lut_lookup(path).properties
 
     def getxattr(self, path, name, position=0):
@@ -239,19 +232,23 @@ class Memory(LoggingMixIn, Operations):
 
     def rmdir(self, path):
         print "rmdir(self, {0})".format(path)
-        dir, parent_dir = pull_file(path), pull_file(os.path.dirname(path))
-        parent_dir.data.remove(path)
+        # remove reference from the parent dir
+        file = self.lut_lookup(path)
+        parent_dir = self.lut_lookup(os.path.dirname(path))
         parent_dir.properties['st_nlink'] -= 1
-        push_file(os.path.dirname(path), parent_dir)
-        push_file(path, None) # mark the old dir as removed in the server ht
+        assert parent_dir.file_type == S_IFDIR
+        del parent_dir.data[file.name]
+        self.ht_update(parent_dir,action='update file')
+        # mark file as removed in the server ht
+        self.ht_update(file,action='remove file')
 
     def setxattr(self, path, name, value, options, position=0):
         print "setxattr(self, {0}, {1}, {2}, {3}, {4})".format(path,name,value,options,position)
         # Ignore options
-        file = pull_file(path)
+        file = self.lut_lookup(path)
         attrs = file.properties.setdefault('attrs', {})
         attrs[name] = value
-        push_file(path,file)
+        self.ht_update(file,action='update file')
 
     def statfs(self, path):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
