@@ -19,7 +19,8 @@ rpc = ServerProxy('http://localhost:8080')
 
 class File(object):
     """ Represents a file (regular file, directory, or soft link) on the file system.
-        PROPERTIES OF THE OBJECT:
+        OBJECT ATTRIBUTES:
+        self.name: the name/basename of the file (str)
         self.properties: contains all the attr and xattr the OS uses to categorize the files,
             this includes their type too (dict).
         self.file_type: returns the type of the file (directory, regular, or link)
@@ -28,14 +29,16 @@ class File(object):
             Regular file: self.data contains the content of the file as str
             Link file: self.data contains a FULL path (from the OS root) stored as a str
     """
-    _id = count(0)
+    _id = count(0) # used for serial number generation
 
     def __init__(self,absolute_path,properties,data):
         if absolute_path == '/': self.name = absolute_path
         else: self.name = os.path.basename(absolute_path)
         self.properties = properties
         self.data = data
-        self.serial_number = self._id.next() #generate a unique serial number for every file
+        self.serial_number = self._id.next() # generate a unique serial number for every file
+
+    file_type = property(lambda  self: self.properties['st_mode'] & 0770000)
 
     def __str__(self): # function used for debugging
         representation = "[[ File: name: {0}, data: {1}, ser num: {2} ]]".format(
@@ -60,7 +63,28 @@ class File(object):
             raise FuseOSError(ENOENT)
         return file
 
-    file_type = property(lambda  self: self.properties['st_mode'] & 0770000)
+    @staticmethod
+    def lookup(path): # returns the file that corresponds to the particular path
+        root = File.pull(0) # first pull the root
+        if path == '/':
+            return root
+        path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
+        if path_parts[-1] == '': # path_parts[-1] will be '' if path ends with / (./a/b/)
+            path_parts.pop() # remove it so we won't be iterating through an empty name
+        context = root
+        for name in path_parts:
+            try:
+                serial_num = context.data[name]
+            except KeyError:
+                raise FuseOSError(ENOENT)
+            file = File.pull(serial_num)
+            assert isinstance(file, File)
+            if file.file_type == S_IFDIR: # we have a directory
+                context = file # set the directory as the new context for the lookup
+            else:
+                return file # we have a regular file, so return it
+        # if we reached this point, it means that the requested file is a dir, so return it
+        return context
 
 
 class Memory(LoggingMixIn, Operations):
@@ -88,29 +112,6 @@ class Memory(LoggingMixIn, Operations):
         print "************************************************************"
 
     @staticmethod
-    def lut_lookup(path):
-        root = File.pull(0) # first pull the root
-        if path == '/':
-            return root
-        path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
-        if path_parts[-1] == '': # path_parts[-1] will be '' if path ends with / (./a/b/)
-            path_parts.pop() # remove it so we won't be iterating through an empty name
-        context = root
-        for name in path_parts:
-            try:
-                serial_num = context.data[name]
-            except KeyError:
-                raise FuseOSError(ENOENT)
-            file = File.pull(serial_num)
-            assert isinstance(file, File)
-            if file.file_type == S_IFDIR: # we have a directory
-                context = file # set the directory as the new context for the lookup
-            else:
-                return file # we have a regular file, so return it
-        # if we reached this point, it means that the requested file is a dir, so return it
-        return context
-
-    @staticmethod
     def ht_update(file,**kwargs): # update the hash table of the server
         if kwargs['action'] == 'add file' or kwargs['action'] == 'update file':
             File.push(file.serial_number,file)
@@ -119,14 +120,14 @@ class Memory(LoggingMixIn, Operations):
         else: raise RuntimeError
 
     def chmod(self, path, mode):
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         file.properties['st_mode'] &= 0770000
         file.properties['st_mode'] |= mode
         self.ht_update(file,action='update file')
         return 0
 
     def chown(self, path, uid, gid):
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         file.properties['st_uid'] = uid
         file.properties['st_gid'] = gid
         self.ht_update(file,action='update file')
@@ -140,7 +141,7 @@ class Memory(LoggingMixIn, Operations):
         new_file = File(path,new_file_propeties,bytes()) # make am empty file
         self.ht_update(new_file,action="add file")
         # then, pull the parent directory, add a reference to it and push it back
-        parent_dir = self.lut_lookup(os.path.dirname(path))
+        parent_dir = File.lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
         parent_dir.data[new_file.name]=new_file.serial_number
         self.ht_update(parent_dir,action='update file')
@@ -150,11 +151,11 @@ class Memory(LoggingMixIn, Operations):
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
         #self.show_server_content() # debug
-        return self.lut_lookup(path).properties
+        return File.lookup(path).properties
 
     def getxattr(self, path, name, position=0):
         print "getxattr(self, {0}, {1}, {2})".format(path,name,position)
-        attrs = self.lut_lookup(path).properties.get('attrs', {})
+        attrs = File.lookup(path).properties.get('attrs', {})
         try:
             return attrs[name]
         except KeyError:
@@ -162,7 +163,7 @@ class Memory(LoggingMixIn, Operations):
 
     def listxattr(self, path):
         print "listxattr(self, {0}".format(path)
-        attrs = self.lut_lookup(path).properties.get('attrs', {})
+        attrs = File.lookup(path).properties.get('attrs', {})
         return attrs.keys()
 
     def mkdir(self, path, mode):
@@ -174,7 +175,7 @@ class Memory(LoggingMixIn, Operations):
         new_dir = File(path,new_dir_properties,{})
         self.ht_update(new_dir,action='add file')
         # then, pull the parent directory, add a reference to it and push it back
-        parent_dir = self.lut_lookup(os.path.dirname(path))
+        parent_dir = File.lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
         parent_dir.data[new_dir.name]=new_dir.serial_number
         parent_dir.properties['st_nlink'] += 1
@@ -187,13 +188,13 @@ class Memory(LoggingMixIn, Operations):
 
     def read(self, path, size, offset, fh):
         print "read(self, {0}, {1}, {2}, {3})".format(path,size,offset,fh)
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         assert file.file_type == S_IFREG
         return file.data[offset:offset + size]
 
     def readdir(self, path, fh):
         print "readdir(self, {0}, {1})".format(path,fh)
-        directory = self.lut_lookup(path)
+        directory = File.lookup(path)
         assert directory.file_type == S_IFDIR
         return ['.', '..'] + [x for x in directory.data]
 
@@ -205,7 +206,7 @@ class Memory(LoggingMixIn, Operations):
 
     def removexattr(self, path, name):
         print "removexattr(self, {0}, {1})".format(path,name)
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         attrs = file.properties.get('attrs', {})
         try:
             del attrs[name]
@@ -215,9 +216,9 @@ class Memory(LoggingMixIn, Operations):
 
     def rename(self, old, new):
         print "rename(self, {0}, {1})".format(old,new)
-        file = self.lut_lookup(old)
+        file = File.lookup(old)
         # pull old parent, remove reference, and push it back
-        old_parent = self.lut_lookup(os.path.dirname(old))
+        old_parent = File.lookup(os.path.dirname(old))
         assert old_parent.file_type == S_IFDIR
         del old_parent.data[file.name]
         self.ht_update(old_parent,action='update file')
@@ -225,7 +226,7 @@ class Memory(LoggingMixIn, Operations):
         file.name = os.path.basename(new)
         self.ht_update(file,action='update file')
         # pull the new parent, add reference to it, and push it back
-        new_parent = self.lut_lookup(os.path.dirname(new))
+        new_parent = File.lookup(os.path.dirname(new))
         assert new_parent.file_type == S_IFDIR
         new_parent.data[file.name] = file.serial_number
         self.ht_update(new_parent,action='update file')
@@ -233,8 +234,8 @@ class Memory(LoggingMixIn, Operations):
     def rmdir(self, path):
         print "rmdir(self, {0})".format(path)
         # remove reference from the parent dir
-        file = self.lut_lookup(path)
-        parent_dir = self.lut_lookup(os.path.dirname(path))
+        file = File.lookup(path)
+        parent_dir = File.lookup(os.path.dirname(path))
         parent_dir.properties['st_nlink'] -= 1
         assert parent_dir.file_type == S_IFDIR
         del parent_dir.data[file.name]
@@ -245,7 +246,7 @@ class Memory(LoggingMixIn, Operations):
     def setxattr(self, path, name, value, options, position=0):
         print "setxattr(self, {0}, {1}, {2}, {3}, {4})".format(path,name,value,options,position)
         # Ignore options
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         attrs = file.properties.setdefault('attrs', {})
         attrs[name] = value
         self.ht_update(file,action='update file')
@@ -265,7 +266,7 @@ class Memory(LoggingMixIn, Operations):
 
     def truncate(self, path, length, fh=None):
         print "truncate(self, {0}, {1}, {2})".format(path,length,fh)
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         assert file.file_type == S_IFREG
         file.data = file.data[:length]
         file.properties['st_size'] = length
@@ -274,8 +275,8 @@ class Memory(LoggingMixIn, Operations):
     def unlink(self, path):
         print "unlink(self, {0})".format(path)
         # remove reference from the parent dir
-        file = self.lut_lookup(path)
-        parent_dir = self.lut_lookup(os.path.dirname(path))
+        file = File.lookup(path)
+        parent_dir = File.lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
         del parent_dir.data[file.name]
         self.ht_update(parent_dir,action='update file')
@@ -286,14 +287,14 @@ class Memory(LoggingMixIn, Operations):
         print "utimens(self, {0}, {1})".format(path,times)
         now = time()
         atime, mtime = times if times else (now, now)
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         file.properties['st_atime'] = atime
         file.properties['st_mtime'] = mtime
         self.ht_update(file,action='update file')
 
     def write(self, path, data, offset, fh):
         print "write(self, {0}, {1}, {2}, {3})".format(path,data,offset,fh)
-        file = self.lut_lookup(path)
+        file = File.lookup(path)
         assert file.file_type == S_IFREG
         file.data = file.data[:offset] + data
         file.properties['st_size'] = len(file.data)
