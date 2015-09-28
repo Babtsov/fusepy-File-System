@@ -24,17 +24,18 @@ class File(object):
             this includes their type too (dict).
         self.file_type: returns the type of the file (directory, regular, or link)
         self.data:
-            Directory file: self.data is a list of files serial numbers
+            Directory file: self.data is a dict<name,serial number>
             Regular file: self.data contains the content of the file as str
             Link file: self.data contains a FULL path (from the OS root) stored as a str
     """
     def __str__(self): # function used for debugging
-        representation = "[[File: abs_path: {0}, data: {1}, ser num: {2} ]]".format(
-            self.absolute_path, repr(self.data), self.serial_number)
+        representation = "[[File: name: {0}, data: {1}, ser num: {2} ]]".format(
+            self.name, repr(self.data), self.serial_number)
         return representation
-    _id = count(1)
+    _id = count(0)
     def __init__(self,absolute_path,properties,data):
-        self.absolute_path = absolute_path
+        if absolute_path == '/': self.name = absolute_path
+        else: self.name = os.path.basename(absolute_path)
         self.properties = properties
         self.data = data
         self.serial_number = self._id.next() #generate a unique serial number for every file
@@ -58,55 +59,63 @@ class File(object):
         return file
 
     file_type = property(lambda  self: self.properties['st_mode'] & 0770000)
-    name = property(lambda self: os.path.basename(self.absolute_path))
 
 
 class Memory(LoggingMixIn, Operations):
     def show_server_content(self): # function used for debugging
         print "**************** Server Contents ***************************"
-        file_lut = File.pull(0)
-        print "lut content:\n", file_lut
-        serial_numbers = [x for x in file_lut.values()]
-        self.max_serial_num = max(max(serial_numbers),self.max_serial_num)
-        print "ht content:"
-        for index in range(self.max_serial_num+1):
-            file = loads(rpc.get(Binary(str(index)))['value'].data)
-            if file == None: # File has been removed
-                print index,": ","The file at node {0} has been removed.".format(index)
-            else:
-                print index,": ",File.pull(index)
+        max_serial_num = 10
+        for index in range(max_serial_num+1):
+            try:
+                file = loads(rpc.get(Binary(str(index)))['value'].data)
+                if file == None: # File has been removed
+                    print index,": ","The file at node {0} has been removed.".format(index)
+                else:
+                    print index,": ",File.pull(index)
+            except:
+                print index,": ","The file at node {0} doesn't exist.".format(index)
         print "************************************************************"
 
     def __init__(self):
-        self.max_serial_num = 0 # used for debugging
         self.fd = 0
         now = time()
         root_properties = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
                                st_mtime=now, st_atime=now, st_nlink=2)
-        root = File('/',root_properties, [])
-        file_lut = {root.absolute_path:root.serial_number} # look-up table absolute path -> serial number
-        File.push(0,file_lut) # store our special LUT in the reserved serial number 0
+        root = File('/',root_properties, {})
         File.push(root.serial_number,root) # store in the server ht serial number -> object
 
     @staticmethod
     def lut_lookup(path):
-        file_lut = File.pull(0) # first pull the file lookup table (absolute path -> serial number)
-        # print "lut content: ", file_lut
-        try: # see if there is a mapping between this path and a particular serial number
-            file_serial_num = file_lut[path]
-        except KeyError:
-            raise FuseOSError(ENOENT) # file not found
-        return File.pull(file_serial_num) # return the file that corresponds to this serial number
+        root = File.pull(0) # first pull the root
+        if path == '/':
+            return root
+        path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
+        if path_parts[-1] == '': # path_parts[-1] will be '' if path ends with / (./a/b/)
+            path_parts.pop() # remove it so we won't be iterating through an empty name
+        context = root
+        for name in path_parts:
+            try:
+                serial_num = context.data[name]
+            except KeyError:
+                raise FuseOSError(ENOENT)
+            file = File.pull(serial_num)
+            assert isinstance(file, File)
+            if file.file_type == S_IFDIR: # we have a directory
+                context = file # set the directory as the new context for the lookup
+            else:
+                return file # we have a regular file, so return it
+        # if we reached this point, it means that the requested file is a dir, so return it
+        return context
 
-    @staticmethod
-    def lut_update(file,**kwargs):
-        file_lut = File.pull(0)
-        if kwargs['action'] == 'add file':
-            file_lut[file.absolute_path] = file.serial_number
-        elif kwargs['action'] == 'remove file':
-            del file_lut[file.absolute_path]
-        else: raise RuntimeError
-        File.push(0,file_lut)
+    # @staticmethod
+    # def lut_update(file,**kwargs):
+    #     file_lut = File.pull(0)
+    #     if kwargs['action'] == 'add file':
+    #         file_lut[file.absolute_path] = file.serial_number
+    #     elif kwargs['action'] == 'remove file':
+    #         del file_lut[file.absolute_path]
+    #     else: raise RuntimeError
+    #     File.push(0,file_lut)
 
     @staticmethod
     def ht_update(file,**kwargs): # update the hash table of the server
@@ -131,17 +140,16 @@ class Memory(LoggingMixIn, Operations):
 
     def create(self, path, mode, fi=None):
         print "create(self, {0}, {1})".format(path,mode)
-        # first make a new regular file, update server ht, and update server LUT
+        # first make a new regular file, update server ht
         new_file_propeties = dict(st_mode=(S_IFREG | mode), st_nlink=1,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
         new_file = File(path,new_file_propeties,bytes()) # make am empty file
-        self.lut_update(new_file,action="add file")
         self.ht_update(new_file,action="add file")
         # then, pull the parent directory, add a reference to it and push it back
         parent_dir = self.lut_lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
-        parent_dir.data.append(new_file.serial_number)
+        parent_dir.data[new_file.name]=new_file.serial_number
         self.ht_update(parent_dir,action='update file')
         self.fd += 1
         return self.fd
@@ -170,13 +178,12 @@ class Memory(LoggingMixIn, Operations):
         new_dir_properties = dict(st_mode=(S_IFDIR | mode), st_nlink=2,
                                 st_size=0, st_ctime=time(), st_mtime=time(),
                                 st_atime=time())
-        new_dir = File(path,new_dir_properties,[])
-        self.lut_update(new_dir,action='add file')
+        new_dir = File(path,new_dir_properties,{})
         self.ht_update(new_dir,action='add file')
         # then, pull the parent directory, add a reference to it and push it back
         parent_dir = self.lut_lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
-        parent_dir.data.append(new_dir.serial_number)
+        parent_dir.data[new_dir.name]=new_dir.serial_number
         parent_dir.properties['st_nlink'] += 1
         self.ht_update(parent_dir,action='update file')
 
@@ -195,11 +202,7 @@ class Memory(LoggingMixIn, Operations):
         print "readdir(self, {0}, {1})".format(path,fh)
         directory = self.lut_lookup(path)
         assert directory.file_type == S_IFDIR
-        contents = ['.', '..']
-        for serial_number in directory.data:
-            child_file = File.pull(serial_number)
-            contents.append(child_file.name)
-        return contents
+        return ['.', '..'] + [x for x in directory.data]
 
     def readlink(self, path): #TODO:: symbolic links
         print "readlink(self, {0})".format(path)
@@ -217,24 +220,22 @@ class Memory(LoggingMixIn, Operations):
             pass        # Should return ENOATTR
         self.ht_update(file,action='update file')
 
-    def rename(self, old, new): #TODO::
+    def rename(self, old, new):
         print "rename(self, {0}, {1})".format(old,new)
+        file = self.lut_lookup(old)
         # pull old parent, remove reference, and push it back
         old_parent = self.lut_lookup(os.path.dirname(old))
         assert old_parent.file_type == S_IFDIR
-
-        old_parent.data.remove(old)
-        push_file(os.path.dirname(old),old_parent)
-
-        #pull the new parent, add reference to it,, and push it back
-        new_parent = pull_file(os.path.dirname(new))
+        del old_parent.data[file.name]
+        self.ht_update(old_parent,action='update file')
+        # update the absolute_path property of the object, update lut, and push it back
+        file.name = os.path.basename(new)
+        self.ht_update(file,action='update file')
+        # pull the new parent, add reference to it, and push it back
+        new_parent = self.lut_lookup(os.path.dirname(new))
         assert new_parent.file_type == S_IFDIR
-        new_parent.data.append(new)
-        push_file(os.path.dirname(new),new_parent)
-
-        file = pull_file(old)
-        push_file(old,None) # mark as deleted in the server ht
-        push_file(new,file) # update the file entry in the ht
+        new_parent.data[file.name] = file.serial_number
+        self.ht_update(new_parent,action='update file')
 
     def rmdir(self, path):
         print "rmdir(self, {0})".format(path)
@@ -279,10 +280,8 @@ class Memory(LoggingMixIn, Operations):
         file = self.lut_lookup(path)
         parent_dir = self.lut_lookup(os.path.dirname(path))
         assert parent_dir.file_type == S_IFDIR
-        parent_dir.data.remove(file.serial_number)
+        del parent_dir.data[file.name]
         self.ht_update(parent_dir,action='update file')
-        # update the lut so we know file doesn't exist
-        self.lut_update(file,action='remove file')
         # mark file as removed in the server ht
         self.ht_update(file,action='remove file')
 
