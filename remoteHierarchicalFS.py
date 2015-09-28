@@ -28,6 +28,10 @@ class File(object):
             Regular file: self.data contains the content of the file as str
             Link file: self.data contains a FULL path (from the OS root) stored as a str
     """
+    def __str__(self): # function used for debugging
+        representation = "[[File: abs_path: {0}, data: {1}, ser num: {2} ]]".format(
+            self.absolute_path, repr(self.data), self.serial_number)
+        return representation
     _id = count(1)
     def __init__(self,absolute_path,properties,data):
         self.absolute_path = absolute_path
@@ -58,6 +62,17 @@ class File(object):
 
 
 class Memory(LoggingMixIn, Operations):
+    def show_ht_lut(self): # function used for debugging
+        print "**************** Server Contents ***************************"
+        file_lut = File.pull(0)
+        print "lut content:\n", file_lut
+        serial_numbers = [x for x in file_lut.values()]
+        max_serial_num = max(serial_numbers)
+        print "ht content:"
+        for index in range(max_serial_num+1):
+            print index,": ",File.pull(index)
+        print "************************************************************"
+
     def __init__(self):
         self.fd = 0
         now = time()
@@ -71,7 +86,7 @@ class Memory(LoggingMixIn, Operations):
     @staticmethod
     def lut_lookup(path):
         file_lut = File.pull(0) # first pull the file lookup table (absolute path -> serial number)
-        print "lut content: ", file_lut
+        # print "lut content: ", file_lut
         try: # see if there is a mapping between this path and a particular serial number
             file_serial_num = file_lut[path]
         except KeyError:
@@ -128,6 +143,7 @@ class Memory(LoggingMixIn, Operations):
 
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
+        self.show_ht_lut() # debug
         return self.lut_lookup(path).properties
 
     def getxattr(self, path, name, position=0):
