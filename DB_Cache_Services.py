@@ -4,6 +4,7 @@ from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
 from collections import OrderedDict
 
+
 class FSMongoClient(object):
     """
     This class manages the communications with the remote database, which stores the file system.
@@ -24,20 +25,31 @@ class FSMongoClient(object):
             now = time()
             meta_data = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
                                st_mtime=now, st_atime=now, st_nlink=2)
-            fs_root = dict(name='/',type='dir',meta=meta_data,data=[])
+            fs_root = dict(name='/',type='dir',meta=meta_data,data={})
             self.root_id = self.fs_collection.insert_one(fs_root).inserted_id
 
-    def id_lookup(self,id): # retrieve a file from the DB using its _id (type is ObjectId)
-        return self.fs_collection.find_one({'_id': id})
+    def id_lookup(self,file_id):
+        # Retrieve a file from the DB using its _id. the _id must be an object of type ObjectId
+        assert type(file_id) == ObjectId
+        return self.fs_collection.find_one({'_id': file_id})
 
-    def insert_new_file(self,path,new_file_dict):
-        pass
+    def insert_new_file(self,new_file_dict):
+        # Insert a file to the DB. all the file contents should be in new_file_dict.
+        # Returns the _id of the newly inserted item.
+        assert {'name','type','meta','data'} == set(new_file_dict.keys())
+        return self.fs_collection.insert_one(new_file_dict).inserted_id
 
-    def update_file(self,path,new_file_dict):
-        pass
-
-    def remove_file(self,path):
-        pass
+    def update_file(self,file_id,field_to_update,field_content):
+        # Update a certain file's property. the property must be one of the following:
+        # name, type, meta, data. field_content is the new value of the file property
+        assert field_to_update in ['name','type','meta','data']
+        self.fs_collection.update_one({"_id":file_id},
+                                      {"$set": {field_to_update:field_content}})
+        
+    def remove_file(self,file_id):
+        # Remove a file from the DB by supplying its _id
+        assert type(file_id) == ObjectId
+        self.fs_collection.remove({'_id' : file_id})
 
     def print_db(self): # used for debugging
         i = 1
@@ -127,3 +139,6 @@ class FileStorageManager(object):
                 return file_doc # we have a regular file, so return it
         # if we reached this point, it means that the requested file is a dir, so return it
         return context
+
+    def update(self,file_id):
+        pass
