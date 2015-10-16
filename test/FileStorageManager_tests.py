@@ -1,33 +1,35 @@
 # Before executing this code, run on another terminal the following:
 # $ mongod --port 27027
 
-from remote_services import FSMongoClient, FileStorageManager
-from bson.objectid import ObjectId
+from remote_services import FileStorageManager
 
 def clear_db(url,port):
 	from pymongo import  MongoClient
 	MongoClient(url,port).FS_DB.FUSEPY_FS.drop() 
 
+
+def print_db_and_cache(storage_manager):
+	storage_manager.db.print_db()
+	storage_manager.cache.print_cache()
+
+
 db_url,db_port = 'localhost',27027
-clear_db(db_url,db_port) # clear the db before the test
+clear_db(db_url,db_port) # clear the db before the test cases
 
 storage_manager = FileStorageManager(db_url,db_port,5)
 
 print "################## TEST 1 ###################"
 print "Creates 2 new files and adds them under root"
-storage_manager.insert('/',dict(name='Loco',type='reg',meta='M',data='HEY!'))
-storage_manager.insert('/',dict(name='dir1',type='dir',meta='M',data={}))
-storage_manager.db.print_db()
-storage_manager.cache.print_cache()
+loco_dict = storage_manager.insert_file(dict(name='Loco',type='reg',meta='M',data='HEY!'))
+dir1_dict = storage_manager.insert_file(dict(name='dir1',type='dir',meta='M',data={}))
+storage_manager.update_dir_data('/',loco_dict,'$add')
+storage_manager.update_dir_data('/',dir1_dict,'$add')
+print_db_and_cache(storage_manager)
 
 print "################## TEST 2 ###################"
 print "Removes dir1 from the file system"
-storage_manager.remove('/dir1')
-storage_manager.db.print_db()
-storage_manager.cache.print_cache()
+removeddir1_dict = storage_manager.remove_file('/dir1')
+storage_manager.update_dir_data('/',removeddir1_dict,'$remove')
+print_db_and_cache(storage_manager)
 
-print "################## TEST 3 ###################"
-print "Changes the name of the Loco file to Coco"
-storage_manager.update('/Loco','name','Coco')
-storage_manager.db.print_db()
-storage_manager.cache.print_cache()
+clear_db(db_url,db_port) # clear the db after the test cases
