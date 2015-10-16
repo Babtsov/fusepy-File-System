@@ -35,7 +35,7 @@ class FSMongoClient(object):
         assert type(file_id) == ObjectId
         return self.fs_collection.find_one({'_id': file_id})
 
-    def insert_new_file(self,new_file_dict):
+    def insert_file(self,new_file_dict):
         # Insert a file to the DB. all the file contents should be in new_file_dict.
         # Returns the _id of the newly inserted item.
         assert {'name','type','meta','data'} == set(new_file_dict.keys())
@@ -110,7 +110,10 @@ class LRUCache(object):
 
 
 class FileStorageManager(object):
-
+    """
+    A class to manage both the database and the cache. It uses the cache for fast 'get' accesses
+    and synchronizes the cache and database whenever data is changed.
+    """
     def __init__(self,db_url,db_port,cache_size):
         self.db = FSMongoClient(db_url,db_port)
         self.cache = LRUCache(cache_size)
@@ -119,7 +122,9 @@ class FileStorageManager(object):
         """
         Tries to retrieve the requested file by id from the cache.
         If failed, tries to retrieve it from the database, and stores the response from the
-        database in the cache. The response can be either the file requested or None.
+        database in the cache. The response can be either the dict of the file requested or None.
+        :param file_id: the ObjectId that corresponds to a file stored in the db or cache
+        :return: dict with the following keys: ('_id', 'name', 'meta', 'type', 'data')
         """
         try:
             return self.cache[file_id]
@@ -128,7 +133,13 @@ class FileStorageManager(object):
             self.cache[file_id] = db_output
             return db_output
 
-    def lookup(self,path): # retrieve a file from the DB or cache using its path (type is str)
+    def lookup(self,path): #
+        """
+        Retrieves a file from the DB or cache using its path. Raises a FuseOSError(ENOENT)
+        if the file is not found.
+        :param path: str representing FS path that corresponds to a file stored in the db or cache
+        :return:dict with the following keys: ('_id', 'name', 'meta', 'type', 'data')
+        """
         root_file = self.retrieve_by_id(self.db.root_id)
         if path == '/':
             return root_file
@@ -149,11 +160,14 @@ class FileStorageManager(object):
         # if we reached this point, it means that the requested file is a dir, so return it
         return context
 
-    def update(self,path,field_to_update,field_content):
+    def update_file(self,path,field_to_update,field_content):
         """
         Updates the file associated with the path(str) with the new field_content.
         Both the database and the cache are updated with the new information.
         If the cache doesn't have the file, it is added to the cache.
+        :param path: str representing FS path that corresponds to a file stored in the db or cache
+        :param field_to_update: must be a str of one of the following: 'name', 'meta', 'type', 'data'
+        :param field_content: the new content to be inserted into one of the fields.
         """
         file_dic = self.lookup(path)
         del self.cache[file_dic['_id']] # remove the old entry from the cache (if it exists)
@@ -161,17 +175,45 @@ class FileStorageManager(object):
         self.cache[file_dic['_id']] = file_dic  # update the cache
         self.db.update_file(file_dic['_id'],field_to_update,field_content)  # update the db
 
-    def insert(self,parent_path,file_dict):
-        new_file_id = self.db.insert_new_file(file_dict)
-        p_file_dict = self.lookup(parent_path) # get the parent file dict
-        del self.cache[p_file_dict['_id']] # remove parent from cache
-        assert p_file_dict['type'] == 'dir'
-        p_file_data = p_file_dict['data']
-        p_file_data[file_dict['name']] = new_file_id # add reference to new file
-        self.cache[p_file_dict['_id']] = p_file_dict # update cache
-        self.db.update_file(p_file_dict['_id'],'data',p_file_data) # update db
+    def update_dir_data(self,path,child_dict,action):
+        """
+        Updates the data of a directory, which represents the contents of this particular dir.
+        The content is always a dictionary mapping file names (str) to _id (ObjectId)
+        :param path: str representing FS path that corresponds to a directory stored in the db or cache
+        :param child_dict: the dictionary of the directory's child. Should have the
+        following keys: ('_id', 'name', 'meta', 'type', 'data')
+        :param action: can be either '$add', '$modify', or '$remove'
+        """
+        file_dict = self.lookup(path)
+        del self.cache[file_dict['_id']]
+        assert file_dict['type'] == 'dir'
+        file_data = file_dict['data']
+        if action in ('$add','$modify'):
+            file_data[child_dict['name']] = child_dict['_id']
+        elif action == '$remove':
+            del file_data[child_dict['name']]
+        else : assert False, "Invalid action used"
+        self.cache[file_dict['_id']] = file_dict
+        self.db.update_file(file_dict['_id'],'data',file_data)
 
-    def remove(self,path): # Deletes a file from both the db and the cache
+    def insert_file(self,file_dict):
+        """
+        Inserts a new file to both the db and cache
+        :param file_dict: The dictionary representing the new file. It should have the following keys:
+        ('name', 'meta', 'type', 'data')
+        :return: the updated file dict which also includes the _id key and its corresponding value generated
+        by the db
+        """
+        new_file_id = self.db.insert_file(file_dict)
+        file_dict['_id'] = new_file_id
+        self.cache[new_file_id] = file_dict
+        return file_dict
+
+    def remove_file(self,path):
+        """
+        Deletes a file from both the db and the cache
+        :param path: str representing FS path that corresponds to a file stored in the db or cache
+        """
         file_id = self.lookup(path)['_id']
         self.db.remove_file(file_id)
         del self.cache[file_id]
