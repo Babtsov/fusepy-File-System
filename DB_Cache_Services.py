@@ -54,7 +54,7 @@ class FSMongoClient(object):
         self.fs_collection.delete_one({'_id' : file_id})
 
     def print_db(self): # used for debugging
-        print "DATABASE CONTENT:\n\t BEGIN DB LIST:"
+        print "DATABASE CONTENT\n\t BEGIN DB LIST:"
         for index, document in enumerate(self.fs_collection.find()):
             print "------------ {0} -----------".format(index)
             print "_id: ",document['_id']
@@ -69,7 +69,8 @@ class LRUCache(object):
     This cache keeps the most recently used key value pairs in a queue based on get requests.
     The queue is managed internally by OrderedDict.
     The internal OrderedDict uses str as a key, but the input to the cache should be object of type ObjectId
-    The cache raises keyError exception if key is not present.
+    The cache raises keyError exception if key is not present. or FuseOSError(ENOENT) if the value that
+    corresponds to the key is None
     Set requests (setting a value to an existing key) don't move the entry up the queue
     """
     def __init__(self, max_size=100):
@@ -81,6 +82,8 @@ class LRUCache(object):
         item = str(item)
         value = self.data.pop(item) # raises keyError exception if not in cache
         self.data[item] = value
+        if not value:
+            raise FuseOSError(ENOENT)
         return value
 
     def __setitem__(self, key, value):
@@ -118,7 +121,7 @@ class FileStorageManager(object):
         self.db = FSMongoClient(db_url,db_port)
         self.cache = LRUCache(cache_size)
 
-    def retrieve_by_id(self,file_id):
+    def _retrieve_file(self,file_id):
         """
         Tries to retrieve the requested file by id from the cache.
         If failed, tries to retrieve it from the database, and stores the response from the
@@ -140,7 +143,7 @@ class FileStorageManager(object):
         :param path: str representing FS path that corresponds to a file stored in the db or cache
         :return:dict with the following keys: ('_id', 'name', 'meta', 'type', 'data')
         """
-        root_file = self.retrieve_by_id(self.db.root_id)
+        root_file = self._retrieve_file(self.db.root_id)
         if path == '/':
             return root_file
         path_parts = path.split("/")[1:] # [1:] to get rid of the first element ''
@@ -152,7 +155,7 @@ class FileStorageManager(object):
                 file_id = root_file['data'][name]
             except KeyError:
                 raise FuseOSError(ENOENT)
-            file_doc = self.retrieve_by_id(file_id)
+            file_doc = self._retrieve_file(file_id)
             if file_doc['type'] == 'dir': # we have a directory
                 context = file_doc # set the directory as the new context for the lookup
             else:
