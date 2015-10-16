@@ -213,7 +213,10 @@ class FileStorageManager(object):
         """
         Deletes a file from both the db and the cache
         :param path: str representing FS path that corresponds to a file stored in the db or cache
+        :return: dict of the deleted file with the following keys: ('_id', 'name', 'meta', 'type', 'data')
         """
-        file_id = self.lookup(path)['_id']
+        file_dict = self.lookup(path)
+        file_id = file_dict['_id']
         self.db.remove_file(file_id)
         del self.cache[file_id]
+        return file_dict
