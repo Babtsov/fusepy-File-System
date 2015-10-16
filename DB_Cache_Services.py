@@ -1,8 +1,10 @@
-from pymongo import  MongoClient
+from pymongo import MongoClient
 from bson.objectid import ObjectId
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
 from collections import OrderedDict
+from fuse import FuseOSError
+from errno import ENOENT
 
 
 class FSMongoClient(object):
@@ -45,22 +47,20 @@ class FSMongoClient(object):
         assert field_to_update in ['name','type','meta','data']
         self.fs_collection.update_one({"_id":file_id},
                                       {"$set": {field_to_update:field_content}})
-        
+
     def remove_file(self,file_id):
         # Remove a file from the DB by supplying its _id
         assert type(file_id) == ObjectId
-        self.fs_collection.remove({'_id' : file_id})
+        self.fs_collection.delete_one({'_id' : file_id})
 
     def print_db(self): # used for debugging
-        i = 1
         print "DATABASE CONTENT:\n\t BEGIN DB LIST:"
-        for document in self.fs_collection.find():
-            print "------------ {0} -----------".format(i)
+        for index, document in enumerate(self.fs_collection.find()):
+            print "------------ {0} -----------".format(index)
             print "_id: ",document['_id']
             print "name: ",document['name']
             print "type: ",document['type']
             print "data: ",document['data']
-            i += 1
         print "\t END DB LIST"
 
 
@@ -68,6 +68,7 @@ class LRUCache(object):
     """
     This cache keeps the most recently used key value pairs in a queue based on get requests.
     The queue is managed internally by OrderedDict.
+    The internal OrderedDict uses str as a key, but the input to the cache should be object of type ObjectId
     The cache raises keyError exception if key is not present.
     Set requests (setting a value to an existing key) don't move the entry up the queue
     """
@@ -76,31 +77,40 @@ class LRUCache(object):
         self.data = OrderedDict()
 
     def __getitem__(self, item):
-        if type(item) == ObjectId:
-            item = str(item)
+        assert type(item) == ObjectId
+        item = str(item)
         value = self.data.pop(item) # raises keyError exception if not in cache
         self.data[item] = value
         return value
 
     def __setitem__(self, key, value):
-        if type(key) == ObjectId:
-            key = str(key)
+        assert type(key) == ObjectId
+        key = str(key)
         if self.capacity == len(self.data): # if we reached max capacity,
-                self.data.popitem(last=False)   # then pop the least recently used
+            self.data.popitem(last=False)   # then pop the least recently used
         self.data[key] = value
 
     def __delitem__(self, key):
-        if type(key) == ObjectId:
-            key = str(key)
+        assert type(key) == ObjectId
+        key = str(key)
         if key in self.data:
             del self.data[key]
 
-    def __str__(self):
-        return "{MAX_SIZE: "+ str(self.capacity) + ". ACTUAL SIZE: " + str(len(self.data)) \
-               + "\n\t CONTENT: " + str(self.data) + "}"
+    def print_cache(self):
+        print "CACHE CONTENT"
+        print "MAX_SIZE: "+ str(self.capacity) + ". ACTUAL SIZE: " + str(len(self.data))
+        print "\t BEGIN CACHE LIST: "
+        for index, document in enumerate(self.data.values()):
+            print "$$$$$$$$$$$ {0} $$$$$$$$$$$$".format(index+1)
+            print "_id: ",document['_id']
+            print "name: ",document['name']
+            print "type: ",document['type']
+            print "data: ",document['data']
+        print "\t END CACHE LIST"
 
 
 class FileStorageManager(object):
+
     def __init__(self,db_url,db_port,cache_size):
         self.db = FSMongoClient(db_url,db_port)
         self.cache = LRUCache(cache_size)
@@ -114,7 +124,7 @@ class FileStorageManager(object):
         try:
             return self.cache[file_id]
         except KeyError:
-            db_output = self.db.id_lookup(file_id) # cache the DB output whther it's a returned file or None
+            db_output = self.db.id_lookup(file_id) # cache the DB output whether it's a returned file or None
             self.cache[file_id] = db_output
             return db_output
 
@@ -130,9 +140,8 @@ class FileStorageManager(object):
             try:
                 file_id = root_file['data'][name]
             except KeyError:
-                return None
+                raise FuseOSError(ENOENT)
             file_doc = self.retrieve_by_id(file_id)
-
             if file_doc['type'] == 'dir': # we have a directory
                 context = file_doc # set the directory as the new context for the lookup
             else:
@@ -140,5 +149,29 @@ class FileStorageManager(object):
         # if we reached this point, it means that the requested file is a dir, so return it
         return context
 
-    def update(self,file_id):
-        pass
+    def update(self,path,field_to_update,field_content):
+        """
+        Updates the file associated with the path(str) with the new field_content.
+        Both the database and the cache are updated with the new information.
+        If the cache doesn't have the file, it is added to the cache.
+        """
+        file_dic = self.lookup(path)
+        del self.cache[file_dic['_id']] # remove the old entry from the cache (if it exists)
+        file_dic[field_to_update] = field_content  # modify the dict of the file
+        self.cache[file_dic['_id']] = file_dic  # update the cache
+        self.db.update_file(file_dic['_id'],field_to_update,field_content)  # update the db
+
+    def insert(self,parent_path,file_dict):
+        new_file_id = self.db.insert_new_file(file_dict)
+        p_file_dict = self.lookup(parent_path) # get the parent file dict
+        del self.cache[p_file_dict['_id']] # remove parent from cache
+        assert p_file_dict['type'] == 'dir'
+        p_file_data = p_file_dict['data']
+        p_file_data[file_dict['name']] = new_file_id # add reference to new file
+        self.cache[p_file_dict['_id']] = p_file_dict # update cache
+        self.db.update_file(p_file_dict['_id'],'data',p_file_data) # update db
+
+    def remove(self,path): # Deletes a file from both the db and the cache
+        file_id = self.lookup(path)['_id']
+        self.db.remove_file(file_id)
+        del self.cache[file_id]
