@@ -37,9 +37,10 @@ class FSMongoClient(object):
 
     def insert_file(self,new_file_dict):
         # Insert a file to the DB. all the file contents should be in new_file_dict.
-        # Returns the _id of the newly inserted item.
+        # This method will modify new_file_dict provided to
+        # include a new property '_id' since the dict now represent a file that was inserted into the database.
         assert {'name','type','meta','data'} == set(new_file_dict.keys())
-        return self.fs_collection.insert_one(new_file_dict).inserted_id
+        self.fs_collection.insert_one(new_file_dict)
 
     def update_file(self,file_id,field_to_update,field_content):
         # Update a certain file's property. the property must be one of the following:
@@ -179,40 +180,57 @@ class FileStorageManager(object):
         self.cache[file_dict['_id']] = file_dict  # update the cache
         self.db.update_file(file_dict['_id'],field_to_update,field_content)  # update the db
 
-    def update_dir_data(self,file_dict,child_dict,action):
+    def update_dir_data(self,dir_dict,**kwargs):
         """
         Updates the data of a directory, which represents the contents of this particular dir.
         The content is always a dictionary mapping file names (str) to _id (ObjectId)
-        :param file_dic: a dictionary represents a file (as stored in the db and cache)
+        :param dir_dict: a dictionary represents a directory (as stored in the db and cache)
         The dictionary must have the following keys: ('_id', 'name', 'meta', 'type', 'data')
-        :param child_dict: the dictionary of the directory's child. Should have the
-        following keys: ('_id', 'name', 'meta', 'type', 'data')
-        :param action: can be either '$add', '$modify', or '$remove'
+        :param **kwargs: 'action' must be supplied with the following '$add', '$modify', or '$rename'
+            if action='$add' is supplied: 'child_dict' must also be supplied as one of the aguments
+            child_dict is the dictionary that represents the child file.
+            if action='$remove' is supplied: 'child_name' must also be supplied. 'child_name' is the
+            name of the child file to be removed from the directory.
+            if action='$rename' is supplied: 'new_name' and 'old_name' must be supplied too.
+            those preresent the new and the old name of the child file to be renamed.
         """
-        assert set(file_dict.keys()) == {'_id','name','type','meta','data'}
-        del self.cache[file_dict['_id']]
-        assert file_dict['type'] == 'dir'
-        file_data = file_dict['data']
-        if action in ('$add','$modify'):
+        assert set(dir_dict.keys()) == {'_id','name','type','meta','data'}
+        assert dir_dict['type'] == 'dir'
+        del self.cache[dir_dict['_id']]
+        file_data = dir_dict['data']
+        if kwargs['action'] == '$add':
+            try:
+                child_dict = kwargs['child_dict']
+            except KeyError:
+                assert False, "child_dict kw argument must be supplied"
+            assert set(child_dict.keys()) == {'_id','name','type','meta','data'}
             file_data[child_dict['name']] = child_dict['_id']
-        elif action == '$remove':
-            del file_data[child_dict['name']]
-        else : assert False, "Invalid action used"
-        self.cache[file_dict['_id']] = file_dict
-        self.db.update_file(file_dict['_id'],'data',file_data)
+
+        elif kwargs['action'] == '$remove':
+            assert 'child_name' in kwargs.keys(), 'No child_name is given for removal'
+            del file_data[kwargs['child_name']]
+
+        elif kwargs['action'] == '$rename':
+            try:
+                old_name, new_name = kwargs['old_name'], kwargs['new_name']
+            except KeyError:
+                assert False, "child old and new names must be supplied in the kwargs"
+            child_id = file_data.pop(old_name)
+            file_data[new_name] = child_id
+        else:
+            assert False, "Invalid action was provided."
+        self.cache[dir_dict['_id']] = dir_dict
+        self.db.update_file(dir_dict['_id'],'data',file_data)
 
     def insert_file(self,file_dict):
         """
-        Inserts a new file to both the db and cache
+        Inserts a new file to both the db and cache. This method will modify file_dict provided to
+        include a new property '_id' since the dict now represent a file that was inserted into the database.
         :param file_dict: The dictionary representing the new file. It should have the following keys:
         ('name', 'meta', 'type', 'data')
-        :return: the updated file dict which also includes the _id key and its corresponding value generated
-        by the db
         """
-        new_file_id = self.db.insert_file(file_dict)
-        file_dict['_id'] = new_file_id
-        self.cache[new_file_id] = file_dict
-        return file_dict
+        self.db.insert_file(file_dict)
+        self.cache[file_dict['_id']] = file_dict
 
     def remove_file(self,file_dict):
         """
@@ -224,4 +242,3 @@ class FileStorageManager(object):
         file_id = file_dict['_id']
         self.db.remove_file(file_id)
         del self.cache[file_id]
-        
