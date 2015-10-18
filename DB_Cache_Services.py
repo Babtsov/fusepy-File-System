@@ -153,7 +153,7 @@ class FileStorageManager(object):
         context = root_file
         for name in path_parts:
             try:
-                file_id = root_file['data'][name]
+                file_id = context['data'][name]
             except KeyError:
                 raise FuseOSError(ENOENT)
             file_doc = self._retrieve_file(file_id)
