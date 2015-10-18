@@ -29,11 +29,32 @@ class FSMongoClient(object):
                                st_mtime=now, st_atime=now, st_nlink=2)
             fs_root = dict(name='/',type='dir',meta=meta_data,data={})
             self.root_id = self.fs_collection.insert_one(fs_root).inserted_id
+    
+    @staticmethod
+    def _encode_dict(data_dict):
+        # used to overcome MongoDB's inability to store keys that contain . or start with $
+        encoded_dict = {}
+        for name, _id in data_dict.items():
+            encoded_name = '_'.join([str(format(ord(x),'x')) for x in name])
+            encoded_dict[encoded_name] = _id
+        return encoded_dict
+    
+    @staticmethod
+    def _decode_dict(data_dict):
+        # used to overcome MongoDB's inability to store keys that contain . or start with $
+        decoded_dict = {}
+        for name, _id in data_dict.items():
+            decoded_name = ''.join([chr(int(x,16)) for x in name.split('_')])
+            decoded_dict[decoded_name] = _id
+        return decoded_dict
 
     def id_lookup(self,file_id):
         # Retrieve a file from the DB using its _id. the _id must be an object of type ObjectId
         assert type(file_id) == ObjectId
-        return self.fs_collection.find_one({'_id': file_id})
+        file_dict = self.fs_collection.find_one({'_id': file_id})
+        if file_dict['type'] == 'dir':
+            file_dict['data'] = self._decode_dict(file_dict['data'])
+        return file_dict
 
     def insert_file(self,new_file_dict):
         # Insert a file to the DB. all the file contents should be in new_file_dict.
@@ -46,6 +67,9 @@ class FSMongoClient(object):
         # Update a certain file's property. the property must be one of the following:
         # name, type, meta, data. field_content is the new value of the file property
         assert field_to_update in ['name','type','meta','data']
+        #assert type(field_content) = type(dict)
+        if field_to_update == 'data' and type(field_content) == dict: # means we have a dir
+            field_content = self._encode_dict(field_content)
         self.fs_collection.update_one({"_id":file_id},
                                       {"$set": {field_to_update:field_content}})
 
