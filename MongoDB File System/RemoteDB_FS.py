@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+#
+# To start MongoDB: mongod --port 27027
+# To mount FS:      python RemoteDB_FS.py fusemount 27027 233
+# To unmount FS:    fusermount -uz ./fusemount
+
 import os
 
 from stat import S_IFDIR, S_IFLNK, S_IFREG
@@ -48,9 +53,7 @@ class ClientFS(Operations):
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
         file_dict = self.storage.lookup(path)
-        print "getattr file_dict",str(file_dict)
         meta = self.storage.lookup(path)['meta']
-        print "getattr meta:", str(meta)
         self.storage.db.print_db()
         self.storage.cache.print_cache()
         return meta
@@ -94,9 +97,6 @@ class ClientFS(Operations):
     def readdir(self, path, fh):
         print "readdir(self, {0}, {1})".format(path,fh)
         dir_dict = self.storage.lookup(path)
-        # print "look"
-        # print ['.', '..'] + [x for x in dir_dict['data']]
-        # print "here"
         assert dir_dict['type'] == 'dir'
         return ['.', '..'] + [x for x in dir_dict['data']]
 
@@ -119,14 +119,13 @@ class ClientFS(Operations):
     def rename(self, old, new):
         print "rename(self, {0}, {1})".format(old,new)
         file_dict = self.storage.lookup(old)
+        # print 'file dict renamed is: ',file_dict
         old_parent_dict = self.storage.lookup(os.path.dirname(old))
+        self.storage.update_dir_data(old_parent_dict,action='$remove',child_name=file_dict['name'])
+        file_dict['name'] = os.path.basename(new)
         new_parent_dict = self.storage.lookup(os.path.dirname(new))
-        if str(new_parent_dict['_id']) == str(old_parent_dict['_id']):
-            self.storage.update_dir_data(old_parent_dict, action='$rename', old_name=file_dict['name'], 
-                                        new_name=os.path.basename(new))
-        else:    
-            self.storage.update_dir_data(old_parent_dict,action='$remove',child_name=file_dict['name'])
-            self.storage.update_dir_data(new_parent_dict,action='$add',child_dict=file_dict)
+        self.storage.update_dir_data(new_parent_dict,action='$add',child_dict=file_dict)
+        
 
     def rmdir(self, path):
         print "rmdir(self, {0})".format(path)
@@ -211,8 +210,8 @@ if __name__ == '__main__':
         print('usage: %s <mountpoint> <port number> <cache size>' % argv[0])
         exit(1)
 
-    print "CLEARING THE DATABASE" # ~~~DEBUG
-    from pymongo import  MongoClient # ~~~DEBUG
-    MongoClient('localhost',27027).FS_DB.FUSEPY_FS.drop() # ~~~DEBUG
+    print "CLEARING THE DATABASE"                           # ~~~DEBUG
+    from pymongo import  MongoClient                        # ~~~DEBUG
+    MongoClient('localhost',27027).FS_DB.FUSEPY_FS.drop()   # ~~~DEBUG
     fuse = FUSE(ClientFS(FileStorageManager('localhost',int(port_num),cache_size)), argv[1], foreground=True, debug = False)
-    # fusermount -uz ./fusemount
+    

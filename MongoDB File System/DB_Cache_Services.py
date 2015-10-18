@@ -70,6 +70,8 @@ class FSMongoClient(object):
         #assert type(field_content) = type(dict)
         if field_to_update == 'data' and type(field_content) == dict: # means we have a dir
             field_content = self._encode_dict(field_content)
+        elif field_to_update == 'name':
+            field_content = '_'.join([str(format(ord(x),'x')) for x in field_content])
         self.fs_collection.update_one({"_id":file_id},
                                       {"$set": {field_to_update:field_content}})
 
@@ -210,13 +212,11 @@ class FileStorageManager(object):
         The content is always a dictionary mapping file names (str) to _id (ObjectId)
         :param dir_dict: a dictionary represents a directory (as stored in the db and cache)
         The dictionary must have the following keys: ('_id', 'name', 'meta', 'type', 'data')
-        :param **kwargs: 'action' must be supplied with the following '$add', '$modify', or '$rename'
+        :param **kwargs: 'action' must be supplied with the following '$add', '$modify'
             if action='$add' is supplied: 'child_dict' must also be supplied as one of the aguments
             child_dict is the dictionary that represents the child file.
             if action='$remove' is supplied: 'child_name' must also be supplied. 'child_name' is the
             name of the child file to be removed from the directory.
-            if action='$rename' is supplied: 'new_name' and 'old_name' must be supplied too.
-            those preresent the new and the old name of the child file to be renamed.
         """
         assert set(dir_dict.keys()) == {'_id','name','type','meta','data'}
         assert dir_dict['type'] == 'dir'
@@ -229,18 +229,9 @@ class FileStorageManager(object):
                 assert False, "child_dict kw argument must be supplied"
             assert set(child_dict.keys()) == {'_id','name','type','meta','data'}
             file_data[child_dict['name']] = child_dict['_id']
-
         elif kwargs['action'] == '$remove':
             assert 'child_name' in kwargs.keys(), 'No child_name is given for removal'
             del file_data[kwargs['child_name']]
-
-        elif kwargs['action'] == '$rename':
-            try:
-                old_name, new_name = kwargs['old_name'], kwargs['new_name']
-            except KeyError:
-                assert False, "child old and new names must be supplied in the kwargs"
-            child_id = file_data.pop(old_name)
-            file_data[new_name] = child_id
         else:
             assert False, "Invalid action was provided."
         self.cache[dir_dict['_id']] = dir_dict
