@@ -92,7 +92,7 @@ class ClientFS(Operations):
     def read(self, path, size, offset, fh):
         print "read(self, {0}, {1}, {2}, {3})".format(path,size,offset,fh)
         file_dict = self.storage.lookup(path)
-        return file_dict['data'][offset:offset + size]
+        return str(file_dict['data'][offset:offset + size])
 
     def readdir(self, path, fh):
         print "readdir(self, {0}, {1})".format(path,fh)
