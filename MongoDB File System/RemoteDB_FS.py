@@ -8,7 +8,7 @@ import os
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from sys import argv, exit
 from time import time
-from remote_services import FileStorageManager
+from DB_Cache_Services import FileStorageManager
 from fuse import FUSE, FuseOSError, Operations
 
 
@@ -54,8 +54,6 @@ class ClientFS(Operations):
         print "getattr(self, {0}, {1})".format(path,fh)
         file_dict = self.storage.lookup(path)
         meta = self.storage.lookup(path)['meta']
-        self.storage.db.print_db()
-        self.storage.cache.print_cache()
         return meta
 
     def getxattr(self, path, name, position=0):
@@ -208,7 +206,4 @@ if __name__ == '__main__':
     except TypeError:
         print('usage: %s <mountpoint> <port number> <cache size>' % argv[0])
         exit(1)
-    print "CLEARING THE DATABASE"                           # ~~~DEBUG
-    from pymongo import  MongoClient                        # ~~~DEBUG
-    MongoClient('localhost',27027).FS_DB.FUSEPY_FS.drop()   # ~~~DEBUG
     fuse = FUSE(ClientFS(FileStorageManager('localhost',int(port_num),cache_size)), argv[1], foreground=True, debug = False)
