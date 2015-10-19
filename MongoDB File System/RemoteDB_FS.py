@@ -5,12 +5,12 @@
 # To unmount FS:    fusermount -uz ./fusemount
 
 import os
-
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from sys import argv, exit
 from time import time
 from remote_services import FileStorageManager
 from fuse import FUSE, FuseOSError, Operations
+
 
 if not hasattr(__builtins__, 'bytes'):
     bytes = str
@@ -126,7 +126,6 @@ class ClientFS(Operations):
         new_parent_dict = self.storage.lookup(os.path.dirname(new))
         self.storage.update_dir_data(new_parent_dict,action='$add',child_dict=file_dict)
         
-
     def rmdir(self, path):
         print "rmdir(self, {0})".format(path)
         file_dict = self.storage.lookup(path)
@@ -148,20 +147,20 @@ class ClientFS(Operations):
         print "statfs(self, {0})".format(path)
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
 
-    def symlink(self, target, source): # TODO::
+    def symlink(self, target, source):
         print "symlink(self, {0}, {1})".format(target,source)
-        # link_properties = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,st_size=len(source),
-        #                        st_ctime=time(), st_mtime=time(),st_atime=time())
-        # file_system_os_path = os.getcwd() + '/' + argv[1] # the path of the FUSE FS relative to the OS's FS
-        # source_path = source
-        # if file_system_os_path in source:
-        #     source_path = source.replace(file_system_os_path,'')
-        # parent_dir = File.lookup(os.path.dirname(target))
-        # full_os_path = os.getcwd() + '/' + argv[1] + source_path
-        # link = File(target,link_properties,full_os_path)
-        # parent_dir.data[link.name] = link.serial_number
-        # self.ht_update(link,action='add file')
-        # self.ht_update(parent_dir,action='update file')
+        now = time()
+        link_meta = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,st_size=len(source),
+                                  st_ctime=now, st_mtime=now,st_atime=now)
+        file_system_os_path = os.getcwd() + '/' + argv[1] # the path of the FUSE FS relative to the OS's FS
+        source_path = source
+        if file_system_os_path in source:
+            source_path = source.replace(file_system_os_path,'')
+        full_os_path = os.getcwd() + '/' + argv[1] + source_path
+        link_dict = dict(name=os.path.basename(target),meta=link_meta,type='link',data=full_os_path)
+        self.storage.insert_file(link_dict)
+        parent_dict = self.storage.lookup(os.path.dirname(target))
+        self.storage.update_dir_data(parent_dict,action='$add',child_dict=link_dict)
 
     def truncate(self, path, length, fh=None):
         print "truncate(self, {0}, {1}, {2})".format(path,length,fh)
@@ -209,9 +208,7 @@ if __name__ == '__main__':
     except TypeError:
         print('usage: %s <mountpoint> <port number> <cache size>' % argv[0])
         exit(1)
-
     print "CLEARING THE DATABASE"                           # ~~~DEBUG
     from pymongo import  MongoClient                        # ~~~DEBUG
     MongoClient('localhost',27027).FS_DB.FUSEPY_FS.drop()   # ~~~DEBUG
     fuse = FUSE(ClientFS(FileStorageManager('localhost',int(port_num),cache_size)), argv[1], foreground=True, debug = False)
-    
