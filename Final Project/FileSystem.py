@@ -137,7 +137,6 @@ class FileSystem(Operations):
 
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
-        rpc.print_content()
         return File.lookup(path).properties
 
     def getxattr(self, path, name, position=0):

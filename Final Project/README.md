@@ -11,3 +11,8 @@ python FileSystem.py fusemount
 fusermount -uz ./fusemount
 ```
 Make sure you are outside of the mount point when unmounting
+
+## To inspect a running server:
+```bash
+python test/insepct_server.py 8080
+```
