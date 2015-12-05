@@ -1,0 +1,7 @@
+/fusemount$ mkdir hey
+/fusemount$ echo "loco" > coco
+/fusemount$ cd hey
+/fusemount/hey$ mkdir qaz
+/fusemount/hey$ mkdir baz
+/fusemount/hey$ cd qaz
+/fusemount/hey/qaz$ echo "I'm in qaz" > above.txt
