@@ -2,7 +2,7 @@
 ```bash
 python Server.py 8080
 ```
-## To start file System:
+## To start the File System:
 ```bash
 python FileSystem.py fusemount
 ```

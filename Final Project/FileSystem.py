@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-import os
-import logging
 
+import os
 from itertools import count
 from errno import ENOENT
 from stat import S_IFDIR, S_IFLNK, S_IFREG
@@ -9,7 +8,6 @@ from sys import argv, exit
 from time import time
 from pickle import dumps, loads
 from xmlrpclib import Binary, ServerProxy
-
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
 if not hasattr(__builtins__, 'bytes'):
@@ -50,6 +48,10 @@ class File(object):
         rpc.put(Binary(str(serial_num)),Binary(dumps(file)))
 
     @staticmethod
+    def delete(serial_num):
+        rpc.delete(Binary(str(serial_num)))
+
+    @staticmethod
     def pull(serial_num): # returns the file that corresponds to the serial number
         try:
             binary_value = rpc.get(Binary(str(serial_num)))
@@ -86,7 +88,7 @@ class File(object):
         return context
 
 
-class Memory(LoggingMixIn, Operations):
+class FileSystem(Operations):
 
     def __init__(self):
         self.fd = 0
@@ -101,7 +103,7 @@ class Memory(LoggingMixIn, Operations):
         if kwargs['action'] == 'add file' or kwargs['action'] == 'update file':
             File.push(file.serial_number,file)
         elif kwargs['action'] == 'remove file':
-            File.push(file.serial_number,None) # mark file as deleted
+            File.delete(file.serial_number)
         else: raise RuntimeError
 
     def chmod(self, path, mode):
@@ -135,8 +137,7 @@ class Memory(LoggingMixIn, Operations):
 
     def getattr(self, path, fh=None):
         print "getattr(self, {0}, {1})".format(path,fh)
-        #self.show_server_content() # debug
-        rpc.print_content();
+        rpc.print_content()
         return File.lookup(path).properties
 
     def getxattr(self, path, name, position=0):
@@ -271,7 +272,6 @@ class Memory(LoggingMixIn, Operations):
         assert parent_dir.file_type == S_IFDIR
         del parent_dir.data[file.name]
         self.ht_update(parent_dir,action='update file')
-        # mark file as removed in the server ht
         self.ht_update(file,action='remove file')
 
     def utimens(self, path, times=None):
@@ -298,7 +298,5 @@ if __name__ == '__main__':
         print('usage: %s <mountpoint>' % argv[0])
         exit(1)
 
-    logging.getLogger().setLevel(logging.DEBUG)
-    fuse = FUSE(Memory(), argv[1], foreground=True, debug = False)
-    # fusermount -uz ./fusemount
+    fuse = FUSE(FileSystem(), argv[1], foreground=True, debug = False)
 
