@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-import sys, pickle
+import pickle
 from xmlrpclib import Binary
 from SimpleXMLRPCServer import SimpleXMLRPCServer
+from sys import argv
 
 
 class Server(object):
@@ -45,5 +46,9 @@ class Server(object):
 
 
 if __name__ == "__main__":
-    port = sys.argv[1]
-    Server("localhost",int(port),True)
+    if len(argv) not in (2,3):
+        print("usage: python Server.py port [-c]")
+        exit(1)
+    port = argv[1]
+    corruptible = True if len(argv) == 3 and argv[2] == "-c" else False
+    Server("localhost",int(port),corruptible)
